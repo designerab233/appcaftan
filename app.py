@@ -12,7 +12,37 @@ FICHIER_PRODUITS = "produits.xlsx"
 FICHIER_VENTES = "ventes.xlsx"
 FICHIER_CHARGES = "charges.xlsx"
 
-# Charger fichiers ou créer si inexistants
+# --- Identifiants utilisateurs ---
+USERS = {
+    "admin": "1234",
+    "abdessamad": "2025"
+}
+
+# ==============================
+# LOGIN
+# ==============================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔑 Connexion")
+
+    username = st.text_input("Nom d'utilisateur")
+    password = st.text_input("Mot de passe", type="password")
+    login_btn = st.button("Se connecter")
+
+    if login_btn:
+        if username in USERS and USERS[username] == password:
+            st.session_state.authenticated = True
+            st.success("✅ Connexion réussie !")
+            st.rerun()
+        else:
+            st.error("❌ Identifiants incorrects")
+    st.stop()  # Stop ici si non connecté
+
+# ==============================
+# CHARGER LES FICHIERS
+# ==============================
 def charger_fichier(nom, colonnes):
     try:
         df = pd.read_excel(nom)
@@ -43,8 +73,16 @@ menu = st.sidebar.radio("📌 Navigation", [
     "📦 Produits",
     "🛒 Ventes",
     "💰 Charges",
-    "📊 Rapports"
+    "📊 Rapports",
+    "🚪 Déconnexion"
 ])
+
+# ==============================
+# PAGE DECONNEXION
+# ==============================
+if menu == "🚪 Déconnexion":
+    st.session_state.authenticated = False
+    st.rerun()
 
 # ==============================
 # PAGE ACCUEIL
@@ -55,7 +93,9 @@ if menu == "🏠 Accueil":
     if not ventes.empty and not produits.empty:
         ventes_detail = ventes.merge(produits, left_on="Produit_ID", right_on="ID", suffixes=("_vente", "_prod"))
         ventes_detail["Revenu"] = ventes_detail["Quantité"] * ventes_detail["Prix vente"]
-        ventes_detail["Cout_prod"] = ventes_detail["Quantité"] * (ventes_detail["Tissu"] + ventes_detail["Main-d'œuvre"] + ventes_detail["Accessoires"])
+        ventes_detail["Cout_prod"] = ventes_detail["Quantité"] * (
+            ventes_detail["Tissu"] + ventes_detail["Main-d'œuvre"] + ventes_detail["Accessoires"]
+        )
     else:
         ventes_detail = pd.DataFrame(columns=["Revenu", "Cout_prod"])
 
@@ -79,7 +119,7 @@ if menu == "🏠 Accueil":
         resume_mensuel["Revenu"] = resume_mensuel["Quantité"] * resume_mensuel["Prix vente"]
         mensuel = resume_mensuel.groupby("Mois")["Revenu"].sum().reset_index()
 
-        fig, ax = plt.subplots(figsize=(8,4))
+        fig, ax = plt.subplots(figsize=(8, 4))
         ax.plot(mensuel["Mois"], mensuel["Revenu"], marker="o")
         ax.set_title("Revenu mensuel")
         ax.set_ylabel("MAD")
@@ -91,12 +131,11 @@ if menu == "🏠 Accueil":
 # ==============================
 elif menu == "📦 Produits":
     st.title("📦 Produits")
-
-    st.subheader("📋 Liste des produits")
     st.dataframe(produits)
 
-    st.subheader("➕ Ajouter / Modifier un produit")
+    # --- Ajouter produit ---
     with st.form("ajout_produit"):
+        st.subheader("➕ Ajouter un produit")
         nom = st.text_input("Nom du produit")
         prix_vente = st.number_input("Prix de vente (MAD)", min_value=0.0, step=100.0)
         tissu = st.number_input("Coût tissu (MAD)", min_value=0.0, step=10.0)
@@ -107,23 +146,54 @@ elif menu == "📦 Produits":
 
         if submit and nom != "":
             new_id = int(produits["ID"].max()) + 1 if not produits.empty else 1
-            new_row = {"ID": new_id, "Nom": nom, "Prix vente": prix_vente, "Tissu": tissu,
-                       "Main-d'œuvre": mo, "Accessoires": accessoires, "Stock": stock}
+            new_row = {"ID": new_id, "Nom": nom, "Prix vente": prix_vente,
+                       "Tissu": tissu, "Main-d'œuvre": mo, "Accessoires": accessoires, "Stock": stock}
             produits = pd.concat([produits, pd.DataFrame([new_row])], ignore_index=True)
             produits.to_excel(FICHIER_PRODUITS, index=False)
             st.success("✅ Produit ajouté avec succès !")
+            st.rerun()
+
+    # --- Modifier / Supprimer produit ---
+    if not produits.empty:
+        st.subheader("✏️ Modifier ou supprimer un produit")
+        produit_id = st.selectbox("Sélectionner un produit", produits["ID"])
+        produit_sel = produits.loc[produits["ID"] == produit_id].iloc[0]
+
+        with st.form("modif_produit"):
+            nom = st.text_input("Nom du produit", produit_sel["Nom"])
+            prix_vente = st.number_input("Prix de vente (MAD)", value=float(produit_sel["Prix vente"]), step=100.0)
+            tissu = st.number_input("Coût tissu (MAD)", value=float(produit_sel["Tissu"]), step=10.0)
+            mo = st.number_input("Main-d'œuvre (MAD)", value=float(produit_sel["Main-d'œuvre"]), step=10.0)
+            accessoires = st.number_input("Accessoires (MAD)", value=float(produit_sel["Accessoires"]), step=10.0)
+            stock = st.number_input("Stock disponible", value=int(produit_sel["Stock"]), step=1)
+
+            col1, col2 = st.columns(2)
+            save = col1.form_submit_button("💾 Mettre à jour")
+            delete = col2.form_submit_button("🗑️ Supprimer")
+
+            if save:
+                produits.loc[produits["ID"] == produit_id, ["Nom", "Prix vente", "Tissu",
+                    "Main-d'œuvre", "Accessoires", "Stock"]] = [nom, prix_vente, tissu, mo, accessoires, stock]
+                produits.to_excel(FICHIER_PRODUITS, index=False)
+                st.success("✅ Produit mis à jour avec succès !")
+                st.rerun()
+
+            if delete:
+                produits = produits[produits["ID"] != produit_id]
+                produits.to_excel(FICHIER_PRODUITS, index=False)
+                st.warning("🗑️ Produit supprimé !")
+                st.rerun()
 
 # ==============================
 # PAGE VENTES
 # ==============================
 elif menu == "🛒 Ventes":
     st.title("🛒 Ventes")
-
-    st.subheader("📋 Historique des ventes")
     st.dataframe(ventes)
 
-    st.subheader("➕ Ajouter une vente")
+    # --- Ajouter vente ---
     with st.form("ajout_vente"):
+        st.subheader("➕ Ajouter une vente")
         produit = st.selectbox("Produit", produits["Nom"] if not produits.empty else [])
         quantite = st.number_input("Quantité", min_value=1, step=1)
         canal = st.selectbox("Canal", ["Boutique", "En ligne", "Marché"])
@@ -137,18 +207,45 @@ elif menu == "🛒 Ventes":
             ventes = pd.concat([ventes, pd.DataFrame([new_row])], ignore_index=True)
             ventes.to_excel(FICHIER_VENTES, index=False)
             st.success("✅ Vente enregistrée !")
+            st.rerun()
+
+    # --- Modifier / Supprimer vente ---
+    if not ventes.empty:
+        st.subheader("✏️ Modifier ou supprimer une vente")
+        vente_id = st.selectbox("Sélectionner une vente", ventes["ID"])
+        vente_sel = ventes.loc[ventes["ID"] == vente_id].iloc[0]
+
+        with st.form("modif_vente"):
+            produit_id = st.selectbox("Produit", produits["ID"], index=produits[produits["ID"] == vente_sel["Produit_ID"]].index[0])
+            quantite = st.number_input("Quantité", value=int(vente_sel["Quantité"]), step=1)
+            canal = st.selectbox("Canal", ["Boutique", "En ligne", "Marché"], index=["Boutique", "En ligne", "Marché"].index(vente_sel["Canal"]))
+
+            col1, col2 = st.columns(2)
+            save = col1.form_submit_button("💾 Mettre à jour")
+            delete = col2.form_submit_button("🗑️ Supprimer")
+
+            if save:
+                ventes.loc[ventes["ID"] == vente_id, ["Produit_ID", "Quantité", "Canal"]] = [produit_id, quantite, canal]
+                ventes.to_excel(FICHIER_VENTES, index=False)
+                st.success("✅ Vente mise à jour !")
+                st.rerun()
+
+            if delete:
+                ventes = ventes[ventes["ID"] != vente_id]
+                ventes.to_excel(FICHIER_VENTES, index=False)
+                st.warning("🗑️ Vente supprimée !")
+                st.rerun()
 
 # ==============================
 # PAGE CHARGES
 # ==============================
 elif menu == "💰 Charges":
     st.title("💰 Charges")
-
-    st.subheader("📋 Liste des charges")
     st.dataframe(charges)
 
-    st.subheader("➕ Ajouter une charge")
+    # --- Ajouter charge ---
     with st.form("ajout_charge"):
+        st.subheader("➕ Ajouter une charge")
         categorie = st.text_input("Catégorie (Marketing, Loyer, etc.)")
         montant = st.number_input("Montant (MAD)", min_value=0.0, step=100.0)
         type_charge = st.selectbox("Type", ["Fixe", "Variable"])
@@ -160,7 +257,35 @@ elif menu == "💰 Charges":
                        "Catégorie": categorie, "Montant": montant, "Type": type_charge}
             charges = pd.concat([charges, pd.DataFrame([new_row])], ignore_index=True)
             charges.to_excel(FICHIER_CHARGES, index=False)
-            st.success("✅ Charge ajoutée avec succès !")
+            st.success("✅ Charge ajoutée !")
+            st.rerun()
+
+    # --- Modifier / Supprimer charge ---
+    if not charges.empty:
+        st.subheader("✏️ Modifier ou supprimer une charge")
+        charge_id = st.selectbox("Sélectionner une charge", charges["ID"])
+        charge_sel = charges.loc[charges["ID"] == charge_id].iloc[0]
+
+        with st.form("modif_charge"):
+            categorie = st.text_input("Catégorie", charge_sel["Catégorie"])
+            montant = st.number_input("Montant (MAD)", value=float(charge_sel["Montant"]), step=100.0)
+            type_charge = st.selectbox("Type", ["Fixe", "Variable"], index=["Fixe", "Variable"].index(charge_sel["Type"]))
+
+            col1, col2 = st.columns(2)
+            save = col1.form_submit_button("💾 Mettre à jour")
+            delete = col2.form_submit_button("🗑️ Supprimer")
+
+            if save:
+                charges.loc[charges["ID"] == charge_id, ["Catégorie", "Montant", "Type"]] = [categorie, montant, type_charge]
+                charges.to_excel(FICHIER_CHARGES, index=False)
+                st.success("✅ Charge mise à jour !")
+                st.rerun()
+
+            if delete:
+                charges = charges[charges["ID"] != charge_id]
+                charges.to_excel(FICHIER_CHARGES, index=False)
+                st.warning("🗑️ Charge supprimée !")
+                st.rerun()
 
 # ==============================
 # PAGE RAPPORTS
